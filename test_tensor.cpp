@@ -148,15 +148,6 @@ void TestTensor(TensorContext &ctx) {
         d.ZeroGrad();
         d.Backward();
 
-        // std::cout << "Tensor a: " << std::endl;
-        // a.PrintTensor();
-        // std::cout << "Tensor b: " << std::endl;
-        // b.PrintTensor();
-        // std::cout << "Tensor c: " << std::endl;
-        // c.PrintTensor();
-        // std::cout << "Tensor d: " << std::endl;
-        // d.PrintTensor();
-
         ut::expect(CheckVectorEqual(d.Flatten(), TO_VEC(result_data)))
             << d.Flatten() << " != " << TO_VEC(result_data) << "\n";
         ut::expect(CheckVectorEqual(d.grad()->Flatten(), TO_VEC(result_grad_data)))
@@ -553,7 +544,7 @@ void TestTensor(TensorContext &ctx) {
             << "x gradients: " << x->grad()->Flatten() << " != " << TO_VEC(x_grad_data) << "\n";
     };
 
-    ut::test("TestTensorSoftmaxCasual") = [&ctx] {
+    ut::test("TestTensorSoftmaxCausal") = [&ctx] {
         std::vector<int> dims = {2, 2, 5};
         float x_data[] = {0.111361f,  -0.000386f, -1.804357f, 0.369323f,  1.306343f,  -0.004050f, 1.898653f,
                           1.455873f,  0.272952f,  1.880325f,  0.164516f,  -0.822872f, 1.178338f,  -0.938773f,
