@@ -1,11 +1,15 @@
 #pragma once
 
+#ifdef _OPENMP
 #include <omp.h>
+#endif
 
 #include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <cstring>
+#include <functional>
 #include <cstdint>
 #include <cstdlib>
 #include <ctime>
@@ -300,7 +304,7 @@ class Tensor {
     }
 
     // Softmax
-    Tensor &Softmax(bool is_casual = false, int vocab_size = 0) {
+    Tensor &Softmax(bool is_causal = false, int vocab_size = 0) {
         assert(type_ == kF32);
         if (vocab_size > 0) {
             assert(vocab_size <= dims_[kMaxTensorDims - 1]);
@@ -308,7 +312,7 @@ class Tensor {
         Tensor *dst = ctx_->NewTensor(Dims(), type_);
         dst->op_ = kOpSoftmax;
         dst->src0_ = this;
-        dst->op_params_[0] = is_casual;
+        dst->op_params_[0] = is_causal;
         dst->op_params_[1] = vocab_size;
         return *dst;
     }
@@ -359,7 +363,7 @@ class Tensor {
         return *dst;
     }
 
-    // Tranpose
+    // Transpose
     Tensor &Transpose(int axis0, int axis1) {
         assert(axis0 < n_dims_ && axis1 < n_dims_);
         auto dimi0 = kMaxTensorDims - n_dims_ + axis0;
@@ -870,8 +874,8 @@ class Tensor {
         size_t n = src0->dims_[2], m = src0->dims_[3], p = dst->dims_[3];
         #pragma omp parallel for collapse(2)
         for (size_t mati = 0; mati < matn; mati++) {
-            float *in1_ma = in1 + mati * src1->mstride();
             for (size_t i = 0; i < n; i++) {
+                float *in1_ma = in1 + mati * src1->mstride();
                 float *din0_mai = din0 + mati * src0->mstride() + i * src0->strides_[2];
                 float *dout_mai = dout + mati * dst->mstride() + i * dst->strides_[2];
                 for (size_t k = 0; k < p; k++) {
@@ -959,6 +963,7 @@ class Tensor {
         assert(src->type_ == kF32 && dst->type_ == src->type_);
         assert(src->IsContiguous() && dst->IsContiguous());
 
+        #pragma omp parallel for
         for (size_t idx = 0; idx < src->n_vec(); idx++) {
             const float *vec = (float *)src->data_ + idx * src->vstride();
             size_t vec_size = src->vsize();
@@ -977,6 +982,7 @@ class Tensor {
     static void norm_backward(Tensor *dst, Tensor *src) {
         src->AllocGrad();
 
+        #pragma omp parallel for
         for (size_t idx = 0; idx < src->n_vec(); idx++) {
             const float *a = (float *)src->data_ + idx * src->vstride();
             const float *b = (float *)dst->data_ + idx * dst->vstride();
@@ -1092,7 +1098,7 @@ class Tensor {
         dims[dimi] = split_size;
     }
 
-    // Tranpose
+    // Transpose
     static void transpose_forward(Tensor *dst, Tensor *src, int dimi0, int dimi1) {
         assert(dst->type_ == kF32);
 
@@ -1182,7 +1188,7 @@ class Tensor {
     }
 
     // Gelu
-    // compute_gelu and backward_gelu are copid from karpathy/llm.c
+    // compute_gelu and backward_gelu are copied from karpathy/llm.c
     static void gelu_forward(Tensor *dst, Tensor *src) {
         assert(dst->SameShape(*src, true, true));
 
@@ -1190,7 +1196,8 @@ class Tensor {
         auto inp = (float *)src->data_;
         auto N = dst->NumElements();
         float s = sqrtf(2.0f / M_PI);
-        for (int i = 0; i < N; i++) {
+        #pragma omp parallel for
+        for (size_t i = 0; i < N; i++) {
             float x = inp[i];
             float cube = 0.044715f * x * x * x;
             out[i] = 0.5f * x * (1.0f + tanhf(s * (x + cube)));
@@ -1206,7 +1213,8 @@ class Tensor {
         auto dout = (float *)dst->grad_->data_;
 
         float s = sqrtf(2.0f / M_PI);
-        for (int i = 0; i < N; i++) {
+        #pragma omp parallel for
+        for (size_t i = 0; i < N; i++) {
             float x = inp[i];
             float cube = 0.044715f * x * x * x;
             float tanh_arg = s * (x + cube);
@@ -1220,21 +1228,24 @@ class Tensor {
     }
 
     // Softmax
-    static void softmax_forward(Tensor *dst, Tensor *src, bool is_casual, int vocab_size) {
+    static void softmax_forward(Tensor *dst, Tensor *src, bool is_causal, int vocab_size) {
         assert(dst->SameShape(*src));
         assert(dst->IsContiguous() && src->IsContiguous());
 
-        auto [n, m] = dst->mat();
+        const auto nm = dst->mat();
+        const size_t n = std::get<0>(nm), m = std::get<1>(nm);
         assert(m > 0);
 
-        for (size_t mati = 0; mati < dst->n_mat(); mati++) {
+        const size_t n_mat = dst->n_mat();
+        #pragma omp parallel for collapse(2)
+        for (size_t mati = 0; mati < n_mat; mati++) {
             for (size_t i = 0; i < n; i++) {
                 auto logits = (float *)src->data_ + mati * src->mstride() + i * m;
                 auto probs = (float *)dst->data_ + mati * dst->mstride() + i * m;
                 int V = vocab_size > 0 ? vocab_size : m;
-                size_t end = is_casual ? i + 1 : V;
+                size_t end = is_causal ? i + 1 : V;
 
-                float maxv = -10000.0f;
+                float maxv = -std::numeric_limits<float>::max();
                 for (size_t j = 0; j < end; j++) {
                     maxv = fmaxf(maxv, logits[j]);
                 }
@@ -1258,27 +1269,30 @@ class Tensor {
         }
     }
 
-    static void softmax_backward(Tensor *dst, Tensor *src, bool is_casual, int vocab_size) {
+    static void softmax_backward(Tensor *dst, Tensor *src, bool is_causal, int vocab_size) {
         src->AllocGrad();
 
         assert(dst->SameShape(*src));
-        auto [n, m] = dst->mat();
+        const auto nm = dst->mat();
+        const size_t n = std::get<0>(nm), m = std::get<1>(nm);
         assert(m > 0);
 
-        for (size_t mati = 0; mati < dst->n_mat(); mati++) {
+        const size_t n_mat = dst->n_mat();
+        #pragma omp parallel for collapse(2)
+        for (size_t mati = 0; mati < n_mat; mati++) {
             for (size_t i = 0; i < n; i++) {
                 auto dout = (float *)dst->grad_->data_ + mati * dst->mstride() + i * m;
                 auto out = (float *)dst->data_ + mati * dst->mstride() + i * m;
                 auto din = (float *)src->grad_->data_ + mati * src->mstride() + i * m;
                 int V = vocab_size > 0 ? vocab_size : m;
-                auto end = is_casual ? i + 1 : V;
+                auto end = is_causal ? i + 1 : V;
 
                 float dsum = 0.0f;
-                for (int j = 0; j < end; j++) {
+                for (size_t j = 0; j < end; j++) {
                     dsum += dout[j] * out[j];
                 }
 
-                for (int j = 0; j < end; j++) {
+                for (size_t j = 0; j < end; j++) {
                     din[j] += out[j] * (dout[j] - dsum);
                 }
             }
@@ -1292,6 +1306,7 @@ class Tensor {
         auto targets = (int32_t *)src1->data_;
         auto vs = src->vsize();
 
+        #pragma omp parallel for
         for (size_t vi = 0; vi < src->n_vec(); vi++) {
             auto probs = (float *)src->data_ + vi * vs;
             auto ix = targets[vi];
@@ -1305,6 +1320,7 @@ class Tensor {
         auto targets = (int32_t *)src1->data_;
         auto vs = src->vsize();
 
+        #pragma omp parallel for
         for (size_t vi = 0; vi < src->n_vec(); vi++) {
             auto probs = (float *)src->data_ + vi * vs;
             auto loss = ((float *)dst->grad_->data_)[vi];
@@ -1322,9 +1338,7 @@ class Tensor {
 
     template <typename T>
     static void vec_fill(size_t vec_size, T *out, const T *data) {
-        for (size_t i = 0; i < vec_size; i++) {
-            out[i] = data[i];
-        }
+        memcpy(out, data, vec_size * sizeof(T));
     }
     template <typename T>
     static void vec_fill(size_t vec_size, T *out, T val) {

@@ -53,7 +53,7 @@ struct GPT2 {
     GPT2Config config;
     TensorContext *ctx{nullptr};  // tensor memory context for the model
 
-    // the wegiths of the model
+    // the weights of the model
     struct Embedding embedding;    // the embedding layer
     std::vector<Block> blocks;     // the transformer blocks
     struct LMHead lm_head;         // the language model head
@@ -284,29 +284,34 @@ void gpt2_update(GPT2 *model, float learning_rate, float beta1, float beta2, flo
         model->v_memory = std::vector<float>(model->num_parameters, 0.0f);
     }
 
-    int idx = 0;
+    // precompute bias correction terms (same for all parameters)
+    float bias_correction1 = 1.0f / (1.0f - powf(beta1, t));
+    float bias_correction2 = 1.0f / (1.0f - powf(beta2, t));
+
+    size_t idx = 0;
     for (auto param : model->params) {
         auto weights = (float *)param->data();
         auto grads = (float *)param->grad()->data();
+        auto n = param->NumElements();
 
-        for (int i = 0; i < param->NumElements(); i++) {
+        #pragma omp parallel for
+        for (int i = 0; i < n; i++) {
             auto w = weights[i], g = grads[i];
 
             // update the first moment (momentum)
-            float m = beta1 * model->m_memory[idx] + (1.0f - beta1) * g;
+            float m = beta1 * model->m_memory[idx + i] + (1.0f - beta1) * g;
             // update the second moment (RMSprop)
-            float v = beta2 * model->v_memory[idx] + (1.0f - beta2) * g * g;
+            float v = beta2 * model->v_memory[idx + i] + (1.0f - beta2) * g * g;
             // bias-correct both moments
-            float m_hat = m / (1.0f - powf(beta1, t));
-            float v_hat = v / (1.0f - powf(beta2, t));
+            float m_hat = m * bias_correction1;
+            float v_hat = v * bias_correction2;
 
             // update
-            model->m_memory[idx] = m;
-            model->v_memory[idx] = v;
+            model->m_memory[idx + i] = m;
+            model->v_memory[idx + i] = v;
             weights[i] -= learning_rate * (m_hat / (sqrtf(v_hat) + eps) + weight_decay * w);
-
-            idx++;
         }
+        idx += n;
     }
 }
 

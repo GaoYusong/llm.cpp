@@ -187,10 +187,12 @@ void TestGPT2() {
 
     bool allok = true;
 
-    // expected losses are as follows, from Python
-    const float expected_losses[10] = {5.270007133483887,  4.059706687927246,  3.3751230239868164, 2.8007826805114746,
-                                       2.315382242202759,  1.8490285873413086, 1.3946564197540283, 0.9991465210914612,
-                                       0.6240804195404053, 0.37651097774505615};
+    // expected losses are as follows, from Python (gen_test_data.py with GPT-2 init)
+    const float expected_losses[10] = {11.0192699432373047f, 9.4176139831542969f,
+                                       8.5316162109375000f,  7.7096872329711914f,
+                                       6.4356555938720703f,  5.7861204147338867f,
+                                       4.9395737648010254f,  4.3603553771972656f,
+                                       3.6258687973022461f,  3.1049942970275879f};
 
     for (int step = 0; step < 10; step++) {
         struct timespec start, end;
