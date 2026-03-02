@@ -1232,11 +1232,13 @@ class Tensor {
         assert(dst->SameShape(*src));
         assert(dst->IsContiguous() && src->IsContiguous());
 
-        auto [n, m] = dst->mat();
+        const auto nm = dst->mat();
+        const size_t n = std::get<0>(nm), m = std::get<1>(nm);
         assert(m > 0);
 
+        const size_t n_mat = dst->n_mat();
         #pragma omp parallel for collapse(2)
-        for (size_t mati = 0; mati < dst->n_mat(); mati++) {
+        for (size_t mati = 0; mati < n_mat; mati++) {
             for (size_t i = 0; i < n; i++) {
                 auto logits = (float *)src->data_ + mati * src->mstride() + i * m;
                 auto probs = (float *)dst->data_ + mati * dst->mstride() + i * m;
@@ -1271,11 +1273,13 @@ class Tensor {
         src->AllocGrad();
 
         assert(dst->SameShape(*src));
-        auto [n, m] = dst->mat();
+        const auto nm = dst->mat();
+        const size_t n = std::get<0>(nm), m = std::get<1>(nm);
         assert(m > 0);
 
+        const size_t n_mat = dst->n_mat();
         #pragma omp parallel for collapse(2)
-        for (size_t mati = 0; mati < dst->n_mat(); mati++) {
+        for (size_t mati = 0; mati < n_mat; mati++) {
             for (size_t i = 0; i < n; i++) {
                 auto dout = (float *)dst->grad_->data_ + mati * dst->mstride() + i * m;
                 auto out = (float *)dst->data_ + mati * dst->mstride() + i * m;
