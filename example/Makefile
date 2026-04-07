@@ -1,16 +1,21 @@
 CC = clang
-CFLAGS = -O3 -Ofast -std=c++20 -g -fsanitize=address
+CFLAGS = -O3 -Ofast -std=c++20 -g
 LDFLAGS =
-LDLIBS = -lm -lc++
+LDLIBS = -lm
 INCLUDES =
 
+# Detect the C++ standard library to link against
+ifeq ($(shell echo 'int main(){}' | $(CC) -lc++ -x c++ - -o /dev/null 2>/dev/null; echo $$?), 0)
+  LDLIBS += -lc++
+else
+  LDLIBS += -lstdc++
+endif
+
 # Check if OpenMP is available
-# This is done by attempting to compile an empty file with OpenMP flags
 # OpenMP makes the code a lot faster so I advise installing it
 # e.g. on MacOS: brew install libomp
 # e.g. on Ubuntu: sudo apt-get install libomp-dev
-# later, run the program by prepending the number of threads, e.g.: OMP_NUM_THREADS=8 ./gpt2
-ifeq ($(shell echo | $(CC) -Xpreprocessor -fopenmp -x c -E - > /dev/null 2>&1; echo $$?), 0)
+ifeq ($(shell printf '\#include <omp.h>\nint main(){return 0;}' | $(CC) -fopenmp -x c - -o /dev/null > /dev/null 2>&1; echo $$?), 0)
   ifeq ($(shell uname), Darwin)
     # macOS with Homebrew
     CFLAGS += -Xclang -fopenmp
@@ -28,7 +33,7 @@ else
 endif
 
 # PHONY means these targets will always be executed
-.PHONY: all example
+.PHONY: all example clean
 
 # default target is all
 all: example
@@ -36,6 +41,5 @@ all: example
 example: tinytorch_example.cpp
 	$(CC) $(CFLAGS) $(INCLUDES) $(LDFLAGS) $< $(LDLIBS) -o $@
 
-	
 clean:
-	rm example
+	rm -f example
